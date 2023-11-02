@@ -1,0 +1,5 @@
+--std=c11
+-Werror
+-Wextra
+-pedantic
+-pedantic-errors

@@ -1,0 +1,23 @@
+.offset #C000h
+.set #0000h
+
+| beginning of program
+label start
+        LOAD %0 &helloworld;
+        LOAD %1 #14;
+
+        WRITE %1 %0;
+
+        HALT;
+
+| the string we want to print
+| note that the string processor doesn't support escape codes currently,
+|    thus the newline ascii code must be entered manually
+label helloworld
+        .ascii "Hello, World!"
+        .byte #Ah
+
+| the reset/startup vector
+| points to the first instruction executed on bootup
+.set #3FFEh
+.word &start

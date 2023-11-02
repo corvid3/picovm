@@ -17,8 +17,11 @@
 #include "config.h"
 #include "defs.h"
 
+// 16 registers, as we can fit two 4bit reg selectors into one byte
+#define NUM_REGS 16
+
 static uint8_t ram[RAMSIZE];
-static uint16_t rs[16];
+static uint16_t rs[NUM_REGS];
 static uint16_t ip;
 static uint16_t stack_base, stack_head;
 static uint8_t flags;
@@ -152,7 +155,7 @@ run(void)
         if (read(intfd, &int_val, 1) < 0)
           ERR("failed to read from interrupt pipe\n");
 
-        if (int_val < 0 || int_val > 2)
+        if (int_val > 2)
           ERR("interrupt value must be either 0, 1, or 2. crashing!\n")
 
         printf("caught incoming signal: %i\n", int_val);
@@ -171,7 +174,7 @@ run(void)
     const enum vm_ops op = op_byte;
 
     if (vm_config.show_steps)
-      printf("stepped | ip = %i; op = %x\n", ip, op_byte);
+      printf("stepped | ip = %Xh; op = %Xh\n", ip, op_byte);
 
     switch (op) {
       case NOP:
@@ -546,7 +549,7 @@ run(void)
     clock_gettime(CLOCK_MONOTONIC, &cur_tick);
 
     diff = diff_timespec(cur_tick, last_tick);
-    // printf("diff: %li %li\n", diff.tv_sec, diff.tv_nsec);
+    printf("diff: %li %li\n", diff.tv_sec, diff.tv_nsec);
     // printf("io: %li %li\n", clock_io.tv_sec, clock_io.tv_nsec);
     if (timespec_lessthan(diff, clock_io)) {
       const struct timespec to_sleep = diff_timespec(clock_io, diff);

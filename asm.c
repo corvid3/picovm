@@ -140,7 +140,7 @@ static int srcidx;
 
 static struct symbol symbols[MAX_SYMBOLS];
 static struct unresolved unresolved[MAX_UNRESOLVED];
-static char outbuf[UINT16_MAX];
+static char outbuf[ROMLEN];
 
 static int num_syms;
 static int num_unresolved;

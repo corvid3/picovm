@@ -1,8 +1,8 @@
 CC = clang
-CFLAGS += -Werror -Wextra -pedantic 
+CFLAGS += -Werror -Wextra -pedantic -pedantic-errors 
 CFLAGS += -std=c11 
 CFLAGS += -fomit-frame-pointer
-CFLAGS += -g -O2
+CFLAGS += -Os
 BINFLAGS += -fuse-ld=mold -flto
 : foreach *.c |> $(CC) $(CFLAGS) -o %o -c %f |> %B.o
-: *.o |> $(CC) $(BINFLAGS) -o %o %f |> vm
+: *.o |> $(CC) $(BINFLAGS) -o %o %f && strip -s %o |> vm

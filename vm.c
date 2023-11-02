@@ -2,6 +2,7 @@
 
 #include <errno.h>
 #include <fcntl.h>
+#include <signal.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdio.h>
@@ -27,8 +28,19 @@ static uint16_t stack_base, stack_head;
 static uint8_t flags;
 static bool interrupt_mask;
 
-static int intfd;
+// we fake the STDIN in the vm,
+// the "vm_forwarder" thread in main.c
+// sends an interrupt request for each stdin character, alongside
+// a 0x00 interrupt request for each character
+static int intfd, fake_stdin;
 struct pollfd intpollfd;
+
+void
+signal_handler(int sig)
+{
+  (void)sig;
+  flags |= HALT_FLAG;
+}
 
 __attribute__((always_inline)) static inline bool
 is_halting(void)
@@ -158,7 +170,7 @@ run(void)
         if (int_val > 2)
           ERR("interrupt value must be either 0, 1, or 2. crashing!\n")
 
-        printf("caught incoming signal: %i\n", int_val);
+        // printf("caught incoming signal: %i\n", int_val);
 
         set_loc_short(ip, stack_head);
         stack_head += 2;
@@ -166,7 +178,7 @@ run(void)
         stack_head += 1;
 
         ip = get_loc_short(int_val * 2);
-        printf("%x\n", ip);
+        // printf("%x\n", ip);
       }
     }
 
@@ -184,7 +196,7 @@ run(void)
         flags |= HALT_FLAG;
         break;
 
-      case MOVE_REG_REG:
+      case LOAD_REG_REG:
         op0 = next_byte_adv();
         rs[(op0 & 0xF0) >> 4] = rs[op0 & 0x0F];
         break;
@@ -232,19 +244,19 @@ run(void)
       case STOR_PTRDEREF_IMM:
         op0 = next_short_adv();
         op1 = next_short_adv();
-        set_loc_short(op0, op1);
+        set_loc_short(op1, op0);
         break;
 
       case STOR_REGDEREF_IMM:
         op0 = next_byte_adv();
         op1 = next_short_adv();
-        set_loc_short(rs[op0 & 0x0f], op1);
+        set_loc_short(op1, rs[op0 & 0x0f]);
         break;
       case STOR_REGDEREF_OFF_IMM:
         op0 = next_byte_adv();
         op1 = next_short_adv();
         tmp = next_short_adv();
-        set_loc_short(rs[op0 & 0x0f] + op1, tmp);
+        set_loc_short(tmp, rs[op0 & 0x0f] + op1);
         break;
 
       case ADD_REG_REG:
@@ -478,15 +490,57 @@ run(void)
         stack_base = op0;
         break;
 
-      case READIN:
+      case READIN_IMM_IMM:
+        op0 = next_short_adv();
+        op1 = next_short_adv();
+        if (read(fake_stdin, &ram[op1], op0) < 0)
+          ERR("failed to read stdin, crashing!\n");
+        break;
+
+      case READIN_IMM_REG:
+        op0 = next_short_adv();
+        op1 = next_byte_adv();
+        if (read(fake_stdin, &ram[rs[op1]], op0) < 0)
+          ERR("failed to read stdin, crashing!\n");
+        break;
+
+      case READIN_REG_IMM:
         op0 = next_byte_adv();
-        if (read(STDIN_FILENO,
+        op1 = next_short_adv();
+        if (read(fake_stdin, &ram[rs[op0]], op1) < 0)
+          ERR("failed to read stdin, crashing!\n");
+        break;
+
+      case READIN_REG_REG:
+        op0 = next_byte_adv();
+        if (read(fake_stdin,
                  (void*)&ram[rs[op0 & 0x0F]],
                  rs[(op0 & 0xF0) >> 4]) < 0)
           ERR("failed to read stdin, crashing!\n");
         break;
 
-      case WRITEOUT:
+      case WRITEOUT_IMM_IMM:
+        op0 = next_short_adv();
+        op1 = next_short_adv();
+        if (write(STDOUT_FILENO, &ram[op1], op0) < 0)
+          ERR("failed to write to stdout, crashing!\n");
+        break;
+
+      case WRITEOUT_IMM_REG:
+        op0 = next_short_adv();
+        op1 = next_byte_adv();
+        if (write(STDOUT_FILENO, &ram[rs[op1]], op0) < 0)
+          ERR("failed to write to stdout, crashing!\n");
+        break;
+
+      case WRITEOUT_REG_IMM:
+        op0 = next_byte_adv();
+        op1 = next_short_adv();
+        if (write(STDOUT_FILENO, &ram[rs[op0]], op1) < 0)
+          ERR("failed to write to stdout, crashing!\n");
+        break;
+
+      case WRITEOUT_REG_REG:
         op0 = next_byte_adv();
         if (write(STDOUT_FILENO,
                   (void*)&ram[rs[op0 & 0x0F]],
@@ -569,8 +623,11 @@ run(void)
 }
 
 extern void
-run_with_rom(const uint8_t* in, size_t len)
+run_with_rom(const uint8_t* in, size_t len, int pipeout_stdin)
 {
+  fake_stdin = pipeout_stdin;
+
+  signal(SIGINT, signal_handler);
   ip = 0;
   interrupt_mask = false;
 
@@ -584,6 +641,9 @@ run_with_rom(const uint8_t* in, size_t len)
 
   intpollfd.events = POLLIN;
   intpollfd.fd = intfd;
+
+  int stdin_fl = fcntl(STDIN_FILENO, F_GETFL);
+  fcntl(STDIN_FILENO, F_SETFL, stdin_fl | O_NONBLOCK);
 
   if (len > ROMLEN)
     ERR("rom len is too large: %lu | must be <= %lu\n", len, ROMLEN);

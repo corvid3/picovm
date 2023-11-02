@@ -28,47 +28,46 @@ enum flags {
 
 enum vm_ops {
   NOP = 0x00,
+  SWAP = 0x01,
 
-  MOVE_REG_REG = 0x10,
+  LOAD_REG_REG = 0x10,
+  LOAD_REG_IMM = 0x11,
+  LOAD_REG_DEREF = 0x12,
+  LOAD_REG_REGDEREF = 0x13,
+  LOAD_REG_REGDEREF_OFF = 0x14,
 
-  LOAD_REG_IMM = 0x20,
-  LOAD_REG_DEREF = 0x21,
-  LOAD_REG_REGDEREF = 0x22,
-  LOAD_REG_REGDEREF_OFF = 0x23,
-
-  STOR_PTRDEREF_REG = 0x24, // stor *22cc, %2
-  STOR_REGDEREF_REG = 0x25,
-  STOR_REGDEREF_OFF_REG = 0x26,
-  STOR_PTRDEREF_IMM = 0x27, // stor *22cc, 00
-  STOR_REGDEREF_IMM = 0x28, // stor [%0], 00
-  STOR_REGDEREF_OFF_IMM = 0x29, // stor [%0 + 24], 0x02
+  STOR_PTRDEREF_REG = 0x15, // stor *22cc, %2
+  STOR_REGDEREF_REG = 0x16,
+  STOR_REGDEREF_OFF_REG = 0x17,
+  STOR_PTRDEREF_IMM = 0x18, // stor *22cc, 00
+  STOR_REGDEREF_IMM = 0x19, // stor [%0], 00
+  STOR_REGDEREF_OFF_IMM = 0x1a, // stor [%0 + 24], 0x02
 
   // arithmetic/bin functions store the result in the second register
   // division rounds down
 
-  ADD_REG_REG = 0x50,
-  ADD_REG_IMM = 0x51,
-  SUB_REG_REG = 0x52,
-  SUB_REG_IMM = 0x53,
-  MUL_REG_REG = 0x54,
-  MUL_REG_IMM = 0x55,
-  DIV_REG_REG = 0x56,
-  DIV_REG_IMM = 0x57,
+  ADD_REG_REG = 0x30,
+  ADD_REG_IMM = 0x31,
+  SUB_REG_REG = 0x32,
+  SUB_REG_IMM = 0x33,
+  MUL_REG_REG = 0x34,
+  MUL_REG_IMM = 0x35,
+  DIV_REG_REG = 0x36,
+  DIV_REG_IMM = 0x37,
 
-  NOT_REG = 0x60,
-  OR_REG_REG = 0x61,
-  OR_REG_IMM = 0x62,
-  AND_REG_REG = 0x63,
-  AND_REG_IMM = 0x64,
-  XOR_REG_REG = 0x65,
-  XOR_REG_IMM = 0x66,
+  NOT_REG = 0x40,
+  OR_REG_REG = 0x41,
+  OR_REG_IMM = 0x42,
+  AND_REG_REG = 0x43,
+  AND_REG_IMM = 0x44,
+  XOR_REG_REG = 0x45,
+  XOR_REG_IMM = 0x46,
 
   // subtract src from dest, set flags, restore dest
-  TEST_REG_REG = 0x70,
-  TEST_REG_IMM = 0x71,
+  TEST_REG_REG = 0x50,
+  TEST_REG_IMM = 0x51,
 
   // swap two registers
-  SWAP = 0x80,
 
   CALL = 0xA0,
   CALLDYN = 0xA1,
@@ -89,10 +88,16 @@ enum vm_ops {
   BRANCH_GREATER_THAN_EQUAL = 0xB6,
 
   // read uint16_t num of bytes to uint16_t loc in mem
-  READIN = 0xF0,
+  READIN_REG_REG = 0xD0,
+  READIN_REG_IMM = 0xD1,
+  READIN_IMM_REG = 0xD2,
+  READIN_IMM_IMM = 0xD3,
 
   // write uint16_t num of bytes from uint16_t loc in mem
-  WRITEOUT = 0xF1,
+  WRITEOUT_REG_REG = 0xD4,
+  WRITEOUT_REG_IMM = 0xD5,
+  WRITEOUT_IMM_REG = 0xD6,
+  WRITEOUT_IMM_IMM = 0xD7,
 
   /// enable interrupts
   ENINT = 0xFA,
@@ -103,6 +108,6 @@ enum vm_ops {
   HALT = 0xFF,
 };
 
-extern void run_with_rom(const uint8_t *rom, size_t len);
+extern void run_with_rom(const uint8_t *rom, size_t len, int pipeout_stdin);
 
 extern char *assemble(const char *in, size_t *outlen);

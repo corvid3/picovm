@@ -1,25 +1,25 @@
 .set    #0h
 .offset #C000h
 
-label _start
+_start:
 	SETHEAD #1000h;
 	SETBASE #1000h;
 
 	LOAD %0 #3;
 	LOAD %1 #3;
-	CALL &powi;
+	CALL powi;
 	HALT;
 
-label powi
+powi:
 	MOVE %2 %0;
-label __LOOP0_powi
+__LOOP0_powi:
 	SUB  %1 #1;
 	TEST %1 #0;
-	BEQL &__LOOP0_EXIT_powi;
+	BEQL __LOOP0_EXIT_powi;
 	MUL  %0 %2;
-	JUMP &__LOOP0_powi;
-label __LOOP0_EXIT_powi
+	JUMP __LOOP0_powi;
+__LOOP0_EXIT_powi:
 	RET;
 
-.set #3FFEh
-.word   &_start
+.set     #3FFEh
+.word    _start

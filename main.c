@@ -44,6 +44,7 @@ struct argument_help help_args[] = {
   { .c = 'f', "specify an input filepath" },
   { .c = 'o', "specify an output filepath" },
   { .c = 's', "when running in vm mode, 'n' number of millis between steps" },
+  { .c = 'S', "when running in vm mode, display current IP and op per step" },
   { .c = 'd', "when running in vm mode, dump registers" },
   { .c = 'D', "when running in vm mode, dump memory to outfile/generic" },
 };
@@ -122,12 +123,12 @@ try_get_fifo(void)
   return fd;
 }
 
-// checks if there is any data in STDIN,
-// if so, trigger an interrupt in the VM
+// forwards any STDIN data to the main VM thread
+// and trips the STDIN interrupt for every character
 static void*
-vm_int_thread(void* args)
+vm_forwarder(void* vs_pipein)
 {
-  (void)args;
+  int pipein = *(int*)vs_pipein;
 
   int fifofd, retry_counter;
   struct pollfd stdinpollfd = { .events = POLLIN, .fd = STDIN_FILENO };
@@ -142,8 +143,17 @@ vm_int_thread(void* args)
   for (;;) {
     if (poll(&stdinpollfd, 1, -1) < 0)
       ERR("polling stdin somehow failed, crashing!\n");
+
+    char c;
+    if (read(STDIN_FILENO, &c, 1) < 1)
+      ERR("faile to read from STDIN in the forwarding thread\n");
+
+    // first write the data
+    if (write(pipein, &c, 1) < 1)
+      ERR("failed to write into the fakestdin pipe\n");
+    // trip the stdin interrupt
     if (write(fifofd, &(int[]){ 0 }, 1) < 0)
-      ERR("failed to write to FIFO\n");
+      ERR("failed to write stdin interrupt to FIFO\n");
   }
 }
 
@@ -172,9 +182,13 @@ run_vm(void)
 
   fclose(file);
 
+  int stdinpipe[2];
+  if (pipe(stdinpipe) < 0)
+    ERR("failed to create fakestdin pipe\n");
+
   pthread_t talker;
-  pthread_create(&talker, NULL, vm_int_thread, NULL);
-  run_with_rom(filedata, filelen);
+  pthread_create(&talker, NULL, vm_forwarder, &stdinpipe[1]);
+  run_with_rom(filedata, filelen, stdinpipe[0]);
   pthread_cancel(talker);
 
   free(filedata);

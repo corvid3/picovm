@@ -23,6 +23,7 @@ struct token
     IDENT,
     DIRECTIVE,
     STRING,
+    LABELDEF,
 
     COMMA,
     SEMICOLON,
@@ -35,8 +36,6 @@ struct token
     DEREF,       // [r0]
     DEREFOFF,    // [r0 + #2]
     DEREFOFFLBL, // [r0 + &somewhere]
-
-    LABEL,
 
     TOK_NOP,
 
@@ -103,9 +102,7 @@ struct tok_str_pair
 };
 
 static const struct tok_str_pair tokpairs[] = {
-  { .dat = "label", .ty = LABEL },
   { .dat = "nop", .ty = TOK_NOP },
-  { .dat = "move", .ty = TOK_MOV },
   { .dat = "load", .ty = TOK_LOAD },
   { .dat = "stor", .ty = TOK_STOR },
   { .dat = "add", .ty = TOK_ADD },
@@ -147,7 +144,6 @@ struct unresolved
 };
 
 #define MAX(x, y) (x > y ? x : y)
-#define NEXTC src[srcidx++]
 #define CURC src[srcidx]
 #define MAX_SYMBOLS 512
 #define MAX_UNRESOLVED 1024
@@ -158,6 +154,8 @@ static int srcidx;
 static struct symbol symbols[MAX_SYMBOLS];
 static struct unresolved unresolved[MAX_UNRESOLVED];
 static char outbuf[ROMLEN];
+
+static int line, col;
 
 static int num_syms;
 static int num_unresolved;
@@ -190,8 +188,6 @@ static const char* TOKTY_NAMES[] = {
   [DEREFOFF] = "DEREFOFF",       // [r0 + #2]
   [DEREFOFFLBL] = "DEREFOFFLBL", // [r0 + &somewhere]
 
-  [LABEL] = "LABEL",
-
   [TOK_NOP] = "TOK_NOP",
 
   [TOK_MOV] = "TOK_MOV",
@@ -223,6 +219,19 @@ static const char* TOKTY_NAMES[] = {
   [TOK_EOF] = "TOK_EOF",
 };
 
+static char
+nextc(void)
+{
+  char c = src[srcidx++];
+  if (c == '\n') {
+    line += 1;
+    col = 0;
+  } else {
+    col += 1;
+  }
+  return c;
+}
+
 static bool
 ishex(char c)
 {
@@ -243,7 +252,7 @@ parse_int(void)
   for (;;) {
     if (!ishex(CURC))
       break;
-    srcidx += 1;
+    nextc();
     end += 1;
   }
 
@@ -257,7 +266,7 @@ parse_int(void)
   errno = 0;
   if (tolower(CURC) == 'h') {
     out = strtol(c, NULL, 16);
-    srcidx += 1;
+    nextc();
   } else
     out = strtol(c, NULL, 10);
 
@@ -284,7 +293,7 @@ parse_ident(void)
     if (!isalnum(CURC) && CURC != '_')
       break;
     end += 1;
-    srcidx += 1;
+    nextc();
   }
 
   len = end - start;
@@ -305,7 +314,7 @@ parse_string(void)
 
   start = end = srcidx;
 
-  while (NEXTC != '\"')
+  while (nextc() != '\"')
     end += 1;
   len = end - start;
 
@@ -338,7 +347,7 @@ next(void)
 {
 retry:
   while (CURC != 0 && isspace(CURC))
-    srcidx += 1;
+    nextc();
 
   switch (CURC) {
     case 0:
@@ -346,56 +355,49 @@ retry:
 
     case '|':
       while (CURC != '\n')
-        srcidx += 1;
+        nextc();
       goto retry;
 
     case ';':
-      srcidx += 1;
+      nextc();
       return (struct token){ .t = SEMICOLON };
 
     case '"':
-      srcidx += 1;
+      nextc();
       return (struct token){ .t = STRING, .d.s = parse_string() };
 
     case '.':
-      srcidx += 1;
+      nextc();
       char* str = parse_ident();
       return (struct token){ .t = DIRECTIVE, .d.s = str };
 
     case ',':
-      srcidx += 1;
+      nextc();
       return (struct token){ .t = COMMA };
 
     case '%':
-      srcidx += 1;
+      nextc();
       int idx = parse_int();
       if (idx > 16)
         ERR("register indexes must be between inclusive 0 and 15\n");
       return (struct token){ .t = REGISTER, .d.i = idx };
 
     case '#':
-      srcidx += 1;
+      nextc();
       return (struct token){
         .t = IMMVAL,
         .d.i = parse_int(),
       };
 
-    case '&':
-      srcidx += 1;
-      return (struct token){
-        .t = LBLVAL,
-        .d.s = parse_ident(),
-      };
-
     case '*':
-      srcidx += 1;
+      nextc();
       return (struct token){
         .t = DEREFVAL,
         .d.i = parse_int(),
       };
 
     case '@':
-      srcidx += 1;
+      nextc();
       return (struct token){
         .t = LBLDEREF,
         .d.s = parse_ident(),
@@ -412,10 +414,18 @@ retry:
             return (struct token){ .t = tokpairs[i].ty };
           }
 
-        return (struct token){
-          .t = IDENT,
-          .d.s = str,
-        };
+        if (src[srcidx] == ':') {
+          nextc();
+          return (struct token){
+            .t = LABELDEF,
+            .d.s = str,
+          };
+        } else {
+          return (struct token){
+            .t = LBLVAL,
+            .d.s = str,
+          };
+        }
       }
   }
 
@@ -436,6 +446,8 @@ init(const char* indat)
 {
   srcidx = 0;
   src = indat;
+
+  line = col = 0;
 
   num_syms = 0;
   outbuf_idx = 0;
@@ -643,6 +655,7 @@ struct matrix_instruction instruction_matrix[] = {
   DEFNZINSTR(TOK_RET, RET),
   DEFNZINSTR(TOK_ENINT, ENINT),
   DEFNZINSTR(TOK_DISINT, DISINT),
+  DEFNZINSTR(TOK_RTI, RTI),
   DEFNZINSTR(TOK_HALT, HALT),
   DEFNINSTR(TOK_SETHEAD,
             {
@@ -659,12 +672,9 @@ struct matrix_instruction instruction_matrix[] = {
               DEFNVARI(CALL, { IMMVAL }),
               DEFNVARI(CALL, { LBLVAL }),
             }),
-  DEFNINSTR(TOK_MOV,
-            {
-              DEFNVARI(MOVE_REG_REG, { REGISTER, REGISTER }),
-            }),
   DEFNINSTR(TOK_LOAD,
             {
+              DEFNVARI(LOAD_REG_REG, { REGISTER, REGISTER }),
               DEFNVARI(LOAD_REG_IMM, { REGISTER, IMMVAL }),
               DEFNVARI(LOAD_REG_IMM, { REGISTER, LBLVAL }),
               DEFNVARI(LOAD_REG_DEREF, { REGISTER, DEREFVAL }),
@@ -673,7 +683,12 @@ struct matrix_instruction instruction_matrix[] = {
   DEFNINSTR(TOK_STOR,
             {
               DEFNVARI(STOR_PTRDEREF_IMM, { DEREFVAL, IMMVAL }),
+              DEFNVARI(STOR_PTRDEREF_IMM, { DEREFVAL, LBLVAL }),
+              DEFNVARI(STOR_PTRDEREF_IMM, { LBLDEREF, IMMVAL }),
+              DEFNVARI(STOR_PTRDEREF_IMM, { LBLDEREF, LBLVAL }),
+
               DEFNVARI(STOR_PTRDEREF_REG, { DEREFVAL, REGISTER }),
+              DEFNVARI(STOR_PTRDEREF_REG, { LBLDEREF, REGISTER }),
             }),
   DEFNINSTR(TOK_ADD,
             {
@@ -737,7 +752,21 @@ struct matrix_instruction instruction_matrix[] = {
             }),
   DEFNINSTR(TOK_WRITE,
             {
-              DEFNVARI(WRITEOUT, { REGISTER, REGISTER }),
+              DEFNVARI(WRITEOUT_IMM_IMM, { IMMVAL, DEREFVAL }),
+              DEFNVARI(WRITEOUT_IMM_IMM, { IMMVAL, LBLDEREF }),
+              DEFNVARI(WRITEOUT_REG_IMM, { REGISTER, DEREFVAL }),
+              DEFNVARI(WRITEOUT_REG_IMM, { REGISTER, LBLDEREF }),
+              DEFNVARI(WRITEOUT_IMM_REG, { IMMVAL, REGISTER }),
+              DEFNVARI(WRITEOUT_REG_REG, { REGISTER, REGISTER }),
+            }),
+  DEFNINSTR(TOK_READ,
+            {
+              DEFNVARI(READIN_IMM_IMM, { IMMVAL, DEREFVAL }),
+              DEFNVARI(READIN_IMM_IMM, { IMMVAL, LBLDEREF }),
+              DEFNVARI(READIN_REG_IMM, { REGISTER, DEREFVAL }),
+              DEFNVARI(READIN_REG_IMM, { REGISTER, LBLDEREF }),
+              DEFNVARI(READIN_IMM_REG, { IMMVAL, REGISTER }),
+              DEFNVARI(READIN_REG_REG, { REGISTER, REGISTER }),
             }),
 };
 
@@ -803,7 +832,10 @@ matrix_instr_perform(struct matrix_instruction instr)
       continue;
     for (int opi = 0; opi < cv.num_ops; opi++) {
       if (toks[opi].t != cv.operands[opi]) {
-        ERR("invalid value in opcode <TODO> in operand loc <TODO>\n");
+        ERR("%i:%i invalid value in opcode <%s>\n",
+            line + 1,
+            col + 1,
+            TOKTY_NAMES[instr.tok]);
       }
     }
   }
@@ -824,7 +856,10 @@ matrix_lookup(enum tokty ty)
       return cur_matr;
   }
 
-  ERR("unknown instruction in perform_matrix: <%s>\n", TOKTY_NAMES[ty]);
+  ERR("%i:%i unknown instruction in perform_matrix: <%s>\n",
+      line + 1,
+      col + 1,
+      TOKTY_NAMES[ty]);
 }
 
 static void
@@ -836,12 +871,7 @@ begin_assemble(void)
 
     if (t.t == TOK_EOF)
       break;
-    else if (t.t == LABEL) {
-      t = next();
-
-      if (t.t != IDENT)
-        ERR("expected an identifier after label decl\n");
-
+    else if (t.t == LABELDEF) {
       push_symbol(t.d.s);
     } else if (t.t == DIRECTIVE) {
       if (!match_directive(t.d.s))

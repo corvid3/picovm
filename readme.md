@@ -1,6 +1,6 @@
-extremely tiny 16-bit VM
-not built to do anything serious, just for fun
-smaller sibling to the 24c16 project
+extremely tiny 16-bit VM  
+not built to do anything serious, just for fun  
+smaller sibling to the 24c16 project  
 
 # buiding
 prerequisites: 

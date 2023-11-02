@@ -174,7 +174,7 @@ run(void)
     const enum vm_ops op = op_byte;
 
     if (vm_config.show_steps)
-      printf("stepped | ip = %Xh; op = %Xh\n", ip, op_byte);
+      printf("stepped | ip = %Xh; op = %Xh\n", ip - 1, op_byte);
 
     switch (op) {
       case NOP:
@@ -186,7 +186,7 @@ run(void)
 
       case MOVE_REG_REG:
         op0 = next_byte_adv();
-        rs[op0 & 0x0F] = rs[(op0 & 0xF0) >> 4];
+        rs[(op0 & 0xF0) >> 4] = rs[op0 & 0x0F];
         break;
 
       case LOAD_REG_IMM:
@@ -203,13 +203,13 @@ run(void)
 
       case LOAD_REG_REGDEREF:
         op0 = next_byte_adv();
-        rs[op0 & 0x0F] = get_loc_short(rs[(op0 & 0xF0) >> 4]);
+        rs[(op0 & 0xF0) >> 4] = get_loc_short(rs[(op0 & 0x0F)]);
         break;
 
       case LOAD_REG_REGDEREF_OFF:
         op0 = next_byte_adv();
         op1 = next_short_adv();
-        rs[op0 & 0x0F] = get_loc_short(rs[(op0 & 0xF0) >> 4] + op1);
+        rs[(op0 & 0xF0) >> 4] = get_loc_short(rs[(op0 & 0x0F)] + op1);
         break;
 
       case STOR_PTRDEREF_REG:
@@ -256,7 +256,7 @@ run(void)
         else
           flags &= ~CRRY_FLAG;
 
-        rs[op0 & 0x0F] = (uint16_t)tmp;
+        rs[(op0 & 0xF0) >> 4] = (uint16_t)tmp;
         break;
 
       case ADD_REG_IMM:
@@ -274,7 +274,7 @@ run(void)
 
       case SUB_REG_REG:
         op0 = next_byte_adv();
-        tmp = (uint32_t)rs[op0 & 0x0F] - (uint32_t)rs[(op0 & 0xF0) >> 4];
+        tmp = (uint32_t)rs[(op0 & 0xF0) >> 4] - (uint32_t)rs[op0 & 0x0F];
 
         // we can abuse some principles of register math here
         // if we underflow the u32, it's going to have a val > UINT16_MAX
@@ -283,7 +283,7 @@ run(void)
         else
           flags &= ~CRRY_FLAG;
 
-        rs[op0 & 0x0F] = tmp;
+        rs[(op0 & 0xF0) >> 4] = tmp;
         break;
 
       case SUB_REG_IMM:
@@ -312,7 +312,7 @@ run(void)
         else
           flags &= ~CRRY_FLAG;
 
-        rs[op0 & 0x0F] = tmp;
+        rs[(op0 & 0xF0) >> 4] = tmp;
         break;
 
       case MUL_REG_IMM:
@@ -333,9 +333,9 @@ run(void)
         op0 = next_byte_adv();
 
         if (rs[(op0 & 0xF0) >> 4] == 0)
-          rs[op0 & 0x0F] = 0;
+          rs[(op0 & 0xF0) >> 4] = 0;
         else
-          rs[op0 & 0x0F] /= rs[(op0 & 0xF0) >> 4];
+          rs[(op0 & 0xF0) >> 4] /= rs[op0 & 0x0F];
 
         break;
 
@@ -356,7 +356,7 @@ run(void)
 
       case OR_REG_REG:
         op0 = next_byte_adv();
-        rs[op0 & 0x0F] |= rs[(op0 & 0xF0) >> 4];
+        rs[(op0 & 0xF0) >> 4] |= rs[op0 & 0x0F];
         break;
 
       case OR_REG_IMM:
@@ -367,7 +367,7 @@ run(void)
 
       case AND_REG_REG:
         op0 = next_byte_adv();
-        rs[op0 & 0x0F] &= rs[(op0 & 0xF0) >> 4];
+        rs[(op0 & 0xF0) >> 4] &= rs[op0 & 0x0F];
         break;
 
       case AND_REG_IMM:
@@ -378,7 +378,7 @@ run(void)
 
       case XOR_REG_REG:
         op0 = next_byte_adv();
-        rs[op0 & 0x0F] ^= rs[(op0 & 0xF0) >> 4];
+        rs[(op0 & 0xF0) >> 4] ^= rs[op0 & 0x0F];
         break;
 
       case XOR_REG_IMM:
@@ -389,7 +389,7 @@ run(void)
 
       case TEST_REG_REG:
         op0 = next_byte_adv();
-        tmp = rs[op0 & 0x0F] - rs[(op0 & 0xF0) >> 4];
+        tmp = rs[(op0 & 0xF0) >> 4] - rs[op0 & 0x0F];
 
         // abusing the underflow principal once more...
         if (tmp > UINT16_MAX)
@@ -451,8 +451,8 @@ run(void)
         break;
 
       case RET:
-        ip = get_loc_short(stack_head);
         stack_head -= 2;
+        ip = get_loc_short(stack_head);
         break;
 
       case PUSH:
@@ -507,33 +507,39 @@ run(void)
         break;
 
       case BRANCH_EQUAL:
+        op0 = next_short_adv();
         if (flags & ZERO_FLAG)
-          ip = next_short_adv();
+          ip = op0;
         break;
 
       case BRANCH_NOT_EQUAL:
+        op0 = next_short_adv();
         if (!(flags & ZERO_FLAG))
-          ip = next_short_adv();
+          ip = op0;
         break;
 
       case BRANCH_LESS_THAN:
+        op0 = next_short_adv();
         if (!(flags & ZERO_FLAG) && !(flags & PLUS_FLAG))
-          ip = next_short_adv();
+          ip = op0;
         break;
 
       case BRANCH_GREATER_THAN:
+        op0 = next_short_adv();
         if (!(flags & ZERO_FLAG) && !(flags & PLUS_FLAG))
-          ip = next_short_adv();
+          ip = op0;
         break;
 
       case BRANCH_LESS_THAN_EQUAL:
+        op0 = next_short_adv();
         if ((flags & ZERO_FLAG) || !(flags & PLUS_FLAG))
-          ip = next_short_adv();
+          ip = op0;
         break;
 
       case BRANCH_GREATER_THAN_EQUAL:
+        op0 = next_short_adv();
         if ((flags & ZERO_FLAG) || !(flags & PLUS_FLAG))
-          ip = next_short_adv();
+          ip = op0;
         break;
 
       case RTI:
@@ -549,7 +555,7 @@ run(void)
     clock_gettime(CLOCK_MONOTONIC, &cur_tick);
 
     diff = diff_timespec(cur_tick, last_tick);
-    printf("diff: %li %li\n", diff.tv_sec, diff.tv_nsec);
+    // printf("diff: %li %li\n", diff.tv_sec, diff.tv_nsec);
     // printf("io: %li %li\n", clock_io.tv_sec, clock_io.tv_nsec);
     if (timespec_lessthan(diff, clock_io)) {
       const struct timespec to_sleep = diff_timespec(clock_io, diff);
@@ -592,7 +598,9 @@ run_with_rom(const uint8_t* in, size_t len)
 
   if (vm_config.dump_registers) {
     for (size_t i = 0; i < 16; i++)
-      printf("%%%li = 0x%x; ", i, rs[i]);
+      printf("\x1b[31;49m%%%Xh\x1b[39;49m = \x1b[33;49m%Xh\x1b[39;49m; ",
+             (int)i,
+             rs[i]);
     printf("\n");
   }
 

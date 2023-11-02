@@ -77,12 +77,9 @@ run_assembler(void)
     outname = (char*)vm_config.output_filename;
 
   infile = fopen(vm_config.input_filename, "r");
-  outfile = fopen(outname, "w");
 
-  if (!infile || !outfile) {
-    fprintf(stderr, "failed to open either infile or outfile\n");
-    exit(1);
-  }
+  if (!infile)
+    ERR("failed to open infile \n");
 
   fseek(infile, 0, SEEK_END);
   infilelen = ftell(infile);
@@ -95,6 +92,10 @@ run_assembler(void)
   }
 
   asmdata = assemble(filedata, &asmlen);
+
+  outfile = fopen(outname, "w");
+  if (!outfile)
+    ERR("failed to open outfile \n");
   fwrite(asmdata, 1, asmlen, outfile);
 
   free(filedata);

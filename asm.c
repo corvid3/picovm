@@ -58,6 +58,15 @@ struct token
     TOK_SETHEAD,
     TOK_SETBASE,
 
+    TOK_TEST,
+    TOK_JUMP,
+    TOK_BEQL,
+    TOK_BNEQ,
+    TOK_BLES,
+    TOK_BGRT,
+    TOK_BLTE,
+    TOK_BGTE,
+
     TOK_READ,
     TOK_WRITE,
 
@@ -109,6 +118,14 @@ static const struct tok_str_pair tokpairs[] = {
   { .dat = "pop", .ty = TOK_POP },
   { .dat = "sethead", .ty = TOK_SETHEAD },
   { .dat = "setbase", .ty = TOK_SETBASE },
+  { .dat = "test", .ty = TOK_TEST },
+  { .dat = "jump", .ty = TOK_JUMP },
+  { .dat = "beql", .ty = TOK_BEQL },
+  { .dat = "bneq", .ty = TOK_BNEQ },
+  { .dat = "bles", .ty = TOK_BLES },
+  { .dat = "bgrt", .ty = TOK_BGRT },
+  { .dat = "blte", .ty = TOK_BLTE },
+  { .dat = "bgte", .ty = TOK_BGTE },
   { .dat = "read", .ty = TOK_READ },
   { .dat = "write", .ty = TOK_WRITE },
   { .dat = "enint", .ty = TOK_ENINT },
@@ -264,7 +281,7 @@ parse_ident(void)
   start = end = srcidx;
 
   for (;;) {
-    if (!isalpha(CURC) && CURC != '_')
+    if (!isalnum(CURC) && CURC != '_')
       break;
     end += 1;
     srcidx += 1;
@@ -298,6 +315,22 @@ parse_string(void)
     c[i - start] = src[i];
 
   return c;
+}
+
+__attribute__((always_inline)) static inline bool
+case_agnostic_strcmp(const char* left, const char* right)
+{
+  const size_t ll = strlen(left);
+  const size_t rl = strlen(right);
+
+  if (ll != rl)
+    return false;
+
+  for (size_t i = 0; i < ll; i++)
+    if (tolower(left[i]) != tolower(right[i]))
+      return false;
+
+  return true;
 }
 
 struct token
@@ -369,15 +402,15 @@ retry:
       };
 
     default:
-      if (isalpha(CURC)) {
+      if (isalpha(CURC) || CURC == '_') {
         char* str = parse_ident();
-        for (int i = 0; i < (int)strlen(str); i++)
-          str[i] = tolower(str[i]);
 
         for (size_t i = 0; i < sizeof(tokpairs) / sizeof(struct tok_str_pair);
              i++)
-          if (strcmp(str, tokpairs[i].dat) == 0)
+          if (case_agnostic_strcmp(str, tokpairs[i].dat)) {
+            free(str);
             return (struct token){ .t = tokpairs[i].ty };
+          }
 
         return (struct token){
           .t = IDENT,
@@ -446,7 +479,7 @@ link(void)
     struct symbol* sym = get_sym(cur.to);
 
     printf(
-      "linking... @%i for %s located @ %i\n", cur.at, sym->label, sym->loc);
+      "linking... @%04Xh -> <%s> = @%04Xh\n", cur.at, sym->label, sym->loc);
 
     if (!sym)
       ERR("failed to find symbol\n");
@@ -461,7 +494,7 @@ push_symbol(char* name)
 {
   symbols[num_syms++] =
     (struct symbol){ .label = name, .loc = outbuf_idx + outbuf_offset };
-  printf("new label %s at 0x%x\n", name, outbuf_idx + outbuf_offset);
+  printf("new label: <%s> = %04Xh\n", name, outbuf_idx + outbuf_offset);
 }
 
 static void
@@ -607,9 +640,25 @@ struct matrix_instruction
 
 struct matrix_instruction instruction_matrix[] = {
   DEFNZINSTR(TOK_NOP, NOP),
+  DEFNZINSTR(TOK_RET, RET),
   DEFNZINSTR(TOK_ENINT, ENINT),
   DEFNZINSTR(TOK_DISINT, DISINT),
   DEFNZINSTR(TOK_HALT, HALT),
+  DEFNINSTR(TOK_SETHEAD,
+            {
+              DEFNVARI(SETHEAD, { IMMVAL }),
+              DEFNVARI(SETHEAD, { LBLVAL }),
+            }),
+  DEFNINSTR(TOK_SETBASE,
+            {
+              DEFNVARI(SETBASE, { IMMVAL }),
+              DEFNVARI(SETBASE, { LBLVAL }),
+            }),
+  DEFNINSTR(TOK_CALL,
+            {
+              DEFNVARI(CALL, { IMMVAL }),
+              DEFNVARI(CALL, { LBLVAL }),
+            }),
   DEFNINSTR(TOK_MOV,
             {
               DEFNVARI(MOVE_REG_REG, { REGISTER, REGISTER }),
@@ -646,11 +695,50 @@ struct matrix_instruction instruction_matrix[] = {
               DEFNVARI(DIV_REG_REG, { REGISTER, REGISTER }),
               DEFNVARI(DIV_REG_IMM, { REGISTER, IMMVAL }),
             }),
+  DEFNINSTR(TOK_TEST,
+            {
+              DEFNVARI(TEST_REG_REG, { REGISTER, REGISTER }),
+              DEFNVARI(TEST_REG_IMM, { REGISTER, IMMVAL }),
+            }),
+  DEFNINSTR(TOK_JUMP,
+            {
+              DEFNVARI(BRANCH, { IMMVAL }),
+              DEFNVARI(BRANCH, { LBLVAL }),
+            }),
+  DEFNINSTR(TOK_BEQL,
+            {
+              DEFNVARI(BRANCH_EQUAL, { IMMVAL }),
+              DEFNVARI(BRANCH_EQUAL, { LBLVAL }),
+            }),
+  DEFNINSTR(TOK_BNEQ,
+            {
+              DEFNVARI(BRANCH_NOT_EQUAL, { IMMVAL }),
+              DEFNVARI(BRANCH_NOT_EQUAL, { LBLVAL }),
+            }),
+  DEFNINSTR(TOK_BLES,
+            {
+              DEFNVARI(BRANCH_LESS_THAN, { IMMVAL }),
+              DEFNVARI(BRANCH_LESS_THAN, { LBLVAL }),
+            }),
+  DEFNINSTR(TOK_BGRT,
+            {
+              DEFNVARI(BRANCH_GREATER_THAN, { IMMVAL }),
+              DEFNVARI(BRANCH_GREATER_THAN, { LBLVAL }),
+            }),
+  DEFNINSTR(TOK_BLTE,
+            {
+              DEFNVARI(BRANCH_LESS_THAN_EQUAL, { IMMVAL }),
+              DEFNVARI(BRANCH_LESS_THAN_EQUAL, { LBLVAL }),
+            }),
+  DEFNINSTR(TOK_BGTE,
+            {
+              DEFNVARI(BRANCH_GREATER_THAN_EQUAL, { IMMVAL }),
+              DEFNVARI(BRANCH_GREATER_THAN_EQUAL, { LBLVAL }),
+            }),
   DEFNINSTR(TOK_WRITE,
             {
               DEFNVARI(WRITEOUT, { REGISTER, REGISTER }),
             }),
-
 };
 
 const int instr_matrix_len =
@@ -736,7 +824,7 @@ matrix_lookup(enum tokty ty)
       return cur_matr;
   }
 
-  ERR("unknown instruction in perform_matrix");
+  ERR("unknown instruction in perform_matrix: <%s>\n", TOKTY_NAMES[ty]);
 }
 
 static void

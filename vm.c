@@ -24,7 +24,6 @@
 static uint8_t ram[RAMSIZE];
 static uint16_t rs[NUM_REGS];
 static uint16_t ip;
-static uint16_t stack_base, stack_head;
 static uint8_t flags;
 static bool interrupt_mask;
 
@@ -34,6 +33,9 @@ static bool interrupt_mask;
 // a 0x00 interrupt request for each character
 static int intfd, fake_stdin;
 struct pollfd intpollfd;
+
+static void
+dump_registers(void);
 
 void
 signal_handler(int sig)
@@ -172,10 +174,10 @@ run(void)
 
         // printf("caught incoming signal: %i\n", int_val);
 
-        set_loc_short(ip, stack_head);
-        stack_head += 2;
-        set_loc_byte(flags, stack_head);
-        stack_head += 1;
+        set_loc_short(ip, rs[STACK_HEAD_REGISTER]);
+        rs[STACK_HEAD_REGISTER] += 2;
+        set_loc_short(flags, rs[STACK_HEAD_REGISTER]);
+        rs[STACK_HEAD_REGISTER] += 1;
 
         ip = get_loc_short(int_val * 2);
         // printf("%x\n", ip);
@@ -450,44 +452,35 @@ run(void)
         break;
 
       case CALL:
-        set_loc_short(ip, stack_head);
-        stack_head += 2;
-        ip = next_short_adv();
+        op0 = next_short_adv();
+        set_loc_short(ip, rs[STACK_HEAD_REGISTER]);
+        rs[STACK_HEAD_REGISTER] += 2;
+        ip = op0;
         break;
 
       case CALLDYN:
         op0 = next_byte_adv();
-        set_loc_short(ip, stack_head);
-        stack_head += 2;
+        set_loc_short(ip, rs[STACK_HEAD_REGISTER]);
+        rs[STACK_HEAD_REGISTER] += 2;
         ip = rs[op0 & 0x0F];
         break;
 
       case RET:
-        stack_head -= 2;
-        ip = get_loc_short(stack_head);
+        rs[STACK_HEAD_REGISTER] -= 2;
+        ip = get_loc_short(rs[STACK_HEAD_REGISTER]);
         break;
 
       case PUSH:
         op0 = next_byte_adv();
         tmp = rs[op0 & 0x0F];
-        set_loc_short(tmp, stack_head);
-        stack_head += 2;
+        set_loc_short(tmp, rs[STACK_HEAD_REGISTER]);
+        rs[STACK_HEAD_REGISTER] += 2;
         break;
 
       case POP:
         op0 = next_byte_adv();
-        stack_head -= 2;
-        rs[op0 & 0x0F] = get_loc_short(stack_head);
-        break;
-
-      case SETHEAD:
-        op0 = next_short_adv();
-        stack_head = op0;
-        break;
-
-      case SETBASE:
-        op0 = next_short_adv();
-        stack_base = op0;
+        rs[STACK_HEAD_REGISTER] -= 2;
+        rs[op0 & 0x0F] = get_loc_short(rs[STACK_HEAD_REGISTER]);
         break;
 
       case READIN_IMM_IMM:
@@ -597,10 +590,10 @@ run(void)
         break;
 
       case RTI:
-        stack_head -= 1;
-        flags = get_loc_byte(stack_head);
-        stack_head -= 2;
-        ip = get_loc_short(stack_head);
+        rs[STACK_HEAD_REGISTER] -= 1;
+        flags = get_loc_byte(rs[STACK_HEAD_REGISTER]);
+        rs[STACK_HEAD_REGISTER] -= 2;
+        ip = get_loc_short(rs[STACK_HEAD_REGISTER]);
         perf_int = false;
         break;
     }
@@ -619,6 +612,59 @@ run(void)
     }
 
     clock_gettime(CLOCK_MONOTONIC, &cur_tick);
+  }
+}
+
+static const char*
+get_register_name_by_idx(size_t idx)
+{
+  switch (idx) {
+    case 0:
+      return "%r0";
+    case 1:
+      return "%r1";
+    case 2:
+      return "%r2";
+    case 3:
+      return "%r3";
+    case 4:
+      return "%r4";
+    case 5:
+      return "%r5";
+    case 6:
+      return "%r6";
+    case 7:
+      return "%r7";
+    case 8:
+      return "%r8";
+    case 9:
+      return "%r9";
+    case 10:
+      return "%x0";
+    case 11:
+      return "%x1";
+    case 12:
+      return "%x2";
+    case 13:
+      return "%x3";
+    case 14:
+      return "%sh";
+    case 15:
+      return "%sb";
+    default:
+      ERR("invalid reg index when trying to get register name\n");
+  };
+}
+
+static void
+dump_registers(void)
+{
+  for (size_t i = 0; i < NUM_REGS; i++) {
+    printf("\x1b[32;49m%s\x1b[39;49m = \x1b[33;49m%04Xh\x1b[39;49m ",
+           get_register_name_by_idx(i),
+           rs[i]);
+    if (i % 4 == 3)
+      printf("\n");
   }
 }
 
@@ -655,14 +701,10 @@ run_with_rom(const uint8_t* in, size_t len, int pipeout_stdin)
   ip = startup_vector;
 
   run();
+  printf("\nvm halted\n");
 
-  if (vm_config.dump_registers) {
-    for (size_t i = 0; i < 16; i++)
-      printf("\x1b[31;49m%%%Xh\x1b[39;49m = \x1b[33;49m%Xh\x1b[39;49m; ",
-             (int)i,
-             rs[i]);
-    printf("\n");
-  }
+  if (vm_config.dump_registers)
+    dump_registers();
 
   if (vm_config.dump_memory) {
     const char* outfile = vm_config.output_filename;

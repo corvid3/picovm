@@ -2,11 +2,11 @@
 .set #0000h
 
 | beginning of program
-label start
-    LOAD  %0 helloworld;
-    LOAD  %1 #14;
+start:
+    LOAD  %x0 helloworld;
+    LOAD  %x1 #14;
 
-    WRITE %1 %0;
+    WRITE %x1 %x0;
 
     HALT;
 

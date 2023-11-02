@@ -17,6 +17,8 @@
 #define ROMLOC 0xC000
 #define ROMLEN ((long)((0xFFFF - 0xC000) + 0x01))
 #define STARTUP_VECTOR 0xFFFE
+#define STACK_HEAD_REGISTER 14
+#define STACK_BASE_REGISTER 15
 
 enum flags {
   CRRY_FLAG = 0x01,
@@ -67,8 +69,6 @@ enum vm_ops {
   TEST_REG_REG = 0x50,
   TEST_REG_IMM = 0x51,
 
-  // swap two registers
-
   CALL = 0xA0,
   CALLDYN = 0xA1,
   RET = 0xA2,
@@ -76,8 +76,6 @@ enum vm_ops {
   RTI = 0xA3,
   PUSH = 0xA5,
   POP = 0xA6,
-  SETHEAD = 0xAA,
-  SETBASE = 0xAB,
 
   BRANCH = 0xB0,
   BRANCH_EQUAL = 0xB1,

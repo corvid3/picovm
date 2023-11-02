@@ -1,0 +1,3 @@
+[submodule "libstr"]
+	path = libstr
+	url = git@github.com:corvid3/libstr.git

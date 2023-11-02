@@ -14,7 +14,5 @@ in_interrupt:
 	WRITE #1 *2000;
 	RTI;
 
-stridx: .word #0000h
-
 .set    #3FFEh
 .word   _start

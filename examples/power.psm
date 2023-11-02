@@ -2,23 +2,29 @@
 .offset #C000h
 
 _start:
-	SETHEAD #1000h;
-	SETBASE #1000h;
+	LOAD %sh #1000h;
+	LOAD %sb #1000h;
 
-	LOAD %0 #3;
-	LOAD %1 #3;
+	LOAD %r0 #3;
+	LOAD %r1 #3;
 	CALL powi;
 	HALT;
 
 powi:
-	MOVE %2 %0;
+	| move the registers into scratch so the state doesn't mutate
+	LOAD %x0 %r0;
+	LOAD %x1 %r1;
+	
+	| copy the original x^n x val
+	LOAD %x2 %x0;
 __LOOP0_powi:
-	SUB  %1 #1;
-	TEST %1 #0;
+	SUB  %x1 #1;
+	TEST %x1 #0;
 	BEQL __LOOP0_EXIT_powi;
-	MUL  %0 %2;
+	MUL  %x0 %x2;
 	JUMP __LOOP0_powi;
 __LOOP0_EXIT_powi:
+	LOAD %r0 %x0;
 	RET;
 
 .set     #3FFEh

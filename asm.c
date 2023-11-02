@@ -131,6 +131,35 @@ static const struct tok_str_pair tokpairs[] = {
   { .dat = "rti", .ty = TOK_RTI }
 };
 
+struct reg_str_pair
+{
+  const char* reg_name;
+  int reg_val;
+};
+
+static const struct reg_str_pair regpairs[] = {
+  // general purpose registers
+  { "r0", 0 },
+  { "r1", 1 },
+  { "r2", 2 },
+  { "r3", 3 },
+  { "r4", 4 },
+  { "r5", 5 },
+  { "r6", 6 },
+  { "r7", 7 },
+  { "r8", 8 },
+  { "r9", 9 },
+
+  // scratch registers
+  { "x0", 10 },
+  { "x1", 11 },
+  { "x2", 12 },
+  { "x3", 13 },
+
+  { "sh", STACK_HEAD_REGISTER },
+  { "sb", STACK_BASE_REGISTER },
+};
+
 struct symbol
 {
   char* label;
@@ -377,10 +406,16 @@ retry:
 
     case '%':
       nextc();
-      int idx = parse_int();
-      if (idx > 16)
-        ERR("register indexes must be between inclusive 0 and 15\n");
-      return (struct token){ .t = REGISTER, .d.i = idx };
+      char* reg = parse_ident();
+      for (size_t i = 0; i < sizeof(regpairs) / sizeof(struct reg_str_pair);
+           i++) {
+        if (case_agnostic_strcmp(regpairs[i].reg_name, reg)) {
+          free(reg);
+          return (struct token){ .t = REGISTER, .d.i = regpairs[i].reg_val };
+        }
+      }
+
+      ERR("%i:%i | unknown register: %s\n", line + 1, col + 1, reg);
 
     case '#':
       nextc();
@@ -657,16 +692,6 @@ struct matrix_instruction instruction_matrix[] = {
   DEFNZINSTR(TOK_DISINT, DISINT),
   DEFNZINSTR(TOK_RTI, RTI),
   DEFNZINSTR(TOK_HALT, HALT),
-  DEFNINSTR(TOK_SETHEAD,
-            {
-              DEFNVARI(SETHEAD, { IMMVAL }),
-              DEFNVARI(SETHEAD, { LBLVAL }),
-            }),
-  DEFNINSTR(TOK_SETBASE,
-            {
-              DEFNVARI(SETBASE, { IMMVAL }),
-              DEFNVARI(SETBASE, { LBLVAL }),
-            }),
   DEFNINSTR(TOK_CALL,
             {
               DEFNVARI(CALL, { IMMVAL }),

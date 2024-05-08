@@ -85,17 +85,14 @@ enum vm_ops {
   BRANCH_LESS_THAN_EQUAL = 0xB5,
   BRANCH_GREATER_THAN_EQUAL = 0xB6,
 
-  // read uint16_t num of bytes to uint16_t loc in mem
-  READIN_REG_REG = 0xD0,
-  READIN_REG_IMM = 0xD1,
-  READIN_IMM_REG = 0xD2,
-  READIN_IMM_IMM = 0xD3,
+  /// read/write byte to port
+  BIN,
+  BOUT,
 
-  // write uint16_t num of bytes from uint16_t loc in mem
-  WRITEOUT_REG_REG = 0xD4,
-  WRITEOUT_REG_IMM = 0xD5,
-  WRITEOUT_IMM_REG = 0xD6,
-  WRITEOUT_IMM_IMM = 0xD7,
+  /// read/write short to port
+  SIN,
+  SOUT,
+
 
   /// enable interrupts
   ENINT = 0xFA,
@@ -106,6 +103,6 @@ enum vm_ops {
   HALT = 0xFF,
 };
 
-extern void run_with_rom(const uint8_t *rom, size_t len, int pipeout_stdin);
+extern void run_with_rom(const uint8_t *rom, size_t len);
 
 extern char *assemble(const char *in, size_t *outlen);

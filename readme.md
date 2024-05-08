@@ -30,12 +30,30 @@ ability to interface with the outside universe via stdin/stdout
 16384 bytes of rom copied into ram at 0xC000-0xFFFF
 start vector is @ 0xFFFE  
 
-## interrupts
-there is one predefined interrupts, and two user-free interrupts for use with
-the two free serial ports. interrupt vectors are reprogrammable as usual
-[int 0 : stdin interrupt]   - vector @ 0x0000
-[int 1 : user programmable] - vector @ 0x0002
-[int 2 : user programmable] - vector @ 0x0004
+## "hardware" timer interrupt
+a singular interrupt may be triggered by an external, programmable clock.
+the clock is set in milliseconds by writing to a specific port io
+
+
+## parallel port
+3 parallel ports may be used by specifying the command line argument
+`-p [unix-port-loc]`. a unix port is opened at the location provided,
+and issuing a connection to the port will assign the connection
+to one of the three parallel ports. if all parallel ports are being used
+at the time of attempting to connect, the connection will be refused
+and an info log will be provided in the stdout of the VM.  
+
+for each byte written into a parallel port from the outside, a port-related
+interrupt will be called (see [hardware interrupts]). the internal state of
+the parallel port will not be updated until after the interrupt is completed,
+so calling `IN $index, %reg` will read the latest byte from the stream into
+the required register. 
+
+| parallel port index | io port |
+|---------------------|---------|
+| 0                   | 0xA0    |
+| 1                   | 0xA1    |
+| 2                   | 0xA2    |
 
 ## asm
 // TODO

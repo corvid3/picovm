@@ -1,0 +1,21 @@
+parallel handler:
+	fd: int
+	buf: []u8
+	len: u16
+	ptr: u16
+
+P0 hardware interface:
+	next:    0x00 OUT | BYTE
+		writing a '1' bit to the `next` port will
+		cause the `current` byte port to be updated with
+		the next byte in the stream.
+		if there are no bytes next in the stream, `current` is specified as 
+		0xFFFF
+
+	current: 0x01 IN | SHORT
+		the current byte in the stream, advanced by writing to "next"
+
+	enable_interrupts: OUT | 0x03
+		enable hardware interrupts?
+
+	interrupt_vector: OUT | i    

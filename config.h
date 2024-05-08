@@ -13,7 +13,8 @@ struct vm_config
 {
   const char* input_filename;
   const char* output_filename;
-
+  const char* parallel_loc;
+  
   bool dump_registers;
   bool dump_memory;
   bool show_steps;

@@ -47,6 +47,8 @@ struct argument_help help_args[] = {
   { .c = 'S', "when running in vm mode, display current IP and op per step" },
   { .c = 'd', "when running in vm mode, dump registers" },
   { .c = 'D', "when running in vm mode, dump memory to outfile/generic" },
+  { .c = 'p',
+    "when running in vm mode, open a parrallel port over a TCP port" },
 };
 
 static void
@@ -104,59 +106,6 @@ run_assembler(void)
   fclose(outfile);
 }
 
-static int
-try_get_fifo(void)
-{
-  int fd, counter = 0;
-
-  const struct timespec timer = { .tv_nsec = 10000000, .tv_sec = 0 };
-
-  do {
-    fd = open(INTFIFO, O_WRONLY);
-    counter += 1;
-    if (counter > 5)
-      return 0;
-    if (fd < 0)
-      nanosleep(&timer, NULL);
-  } while (fd < 0);
-
-  return fd;
-}
-
-// forwards any STDIN data to the main VM thread
-// and trips the STDIN interrupt for every character
-static void*
-vm_forwarder(void* vs_pipein)
-{
-  int pipein = *(int*)vs_pipein;
-
-  int fifofd, retry_counter;
-  struct pollfd stdinpollfd = { .events = POLLIN, .fd = STDIN_FILENO };
-
-  fifofd = try_get_fifo();
-
-  if (fifofd < 0)
-    ERR("failed to open fifo file from the talker thread | %i %s\n",
-        errno,
-        strerror(errno));
-
-  for (;;) {
-    if (poll(&stdinpollfd, 1, -1) < 0)
-      ERR("polling stdin somehow failed, crashing!\n");
-
-    char c;
-    if (read(STDIN_FILENO, &c, 1) < 1)
-      ERR("faile to read from STDIN in the forwarding thread\n");
-
-    // first write the data
-    if (write(pipein, &c, 1) < 1)
-      ERR("failed to write into the fakestdin pipe\n");
-    // trip the stdin interrupt
-    if (write(fifofd, &(int[]){ 0 }, 1) < 0)
-      ERR("failed to write stdin interrupt to FIFO\n");
-  }
-}
-
 static void
 run_vm(void)
 {
@@ -182,14 +131,7 @@ run_vm(void)
 
   fclose(file);
 
-  int stdinpipe[2];
-  if (pipe(stdinpipe) < 0)
-    ERR("failed to create fakestdin pipe\n");
-
-  pthread_t talker;
-  pthread_create(&talker, NULL, vm_forwarder, &stdinpipe[1]);
-  run_with_rom(filedata, filelen, stdinpipe[0]);
-  pthread_cancel(talker);
+  run_with_rom(filedata, filelen);
 
   free(filedata);
 }
@@ -199,13 +141,10 @@ main(int argc, char** argv)
 {
   enum runtype type = RUN_HELP;
   char b;
+  int tmp;
 
-  while ((b = getopt(argc, argv, "+avhf:o:s:dDS")) != -1) {
+  while ((b = getopt(argc, argv, "+avhf:o:s:dDSp:")) != -1) {
     switch (b) {
-      case 'f':
-        vm_config.input_filename = optarg;
-        break;
-
       case 'h':
         type = RUN_HELP;
         break;
@@ -218,8 +157,20 @@ main(int argc, char** argv)
         type = RUN_VM;
         break;
 
+      case 'f':
+        vm_config.input_filename = optarg;
+        break;
+
       case 'o':
         vm_config.output_filename = optarg;
+        break;
+
+      case 'p':
+        errno = 0;
+        tmp = strtol(optarg, NULL, 10);
+        if (errno != 0)
+          ERR("expected a number as an argument to 'p'\n");
+        vm_config.parallel_port = tmp;
         break;
 
       case 'd':
@@ -231,7 +182,11 @@ main(int argc, char** argv)
         break;
 
       case 's':
-        vm_config.step_sleep = atoi(optarg);
+        errno = 0;
+        tmp = strtol(optarg, NULL, 10);
+        if (errno != 0)
+          ERR("expected a number as an argument to 's'\n");
+        vm_config.step_sleep = tmp;
         break;
 
       case 'S':

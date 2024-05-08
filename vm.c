@@ -1,7 +1,10 @@
 #define _POSIX_C_SOURCE 199309L
 
+#include <arpa/inet.h>
 #include <errno.h>
 #include <fcntl.h>
+#include <netinet/ip.h>
+#include <pthread.h>
 #include <signal.h>
 #include <stdbool.h>
 #include <stddef.h>
@@ -17,6 +20,13 @@
 
 #include "config.h"
 #include "defs.h"
+#include "interrupt.h"
+#include "parallel.h"
+
+// define interrupt values here
+extern pthread_mutex_t interrupt_mutex;
+extern enum interrupt_type interrupt_queue[64];
+extern int interrupt_queue_len;
 
 // 16 registers, as we can fit two 4bit reg selectors into one byte
 #define NUM_REGS 16
@@ -26,13 +36,6 @@ static uint16_t rs[NUM_REGS];
 static uint16_t ip;
 static uint8_t flags;
 static bool interrupt_mask;
-
-// we fake the STDIN in the vm,
-// the "vm_forwarder" thread in main.c
-// sends an interrupt request for each stdin character, alongside
-// a 0x00 interrupt request for each character
-static int intfd, fake_stdin;
-struct pollfd intpollfd;
 
 static void
 dump_registers(void);
@@ -102,6 +105,33 @@ get_loc_byte(const uint16_t loc)
   return out;
 }
 
+__attribute__((always_inline)) static inline void
+stack_push_byte(const uint8_t val)
+{
+  ram[rs[STACK_HEAD_REGISTER]] = val;
+  rs[STACK_HEAD_REGISTER] += 1;
+}
+
+__attribute__((always_inline)) static inline void
+stack_push_short(const uint16_t val)
+{
+  stack_push_byte(val >> 8);
+  stack_push_byte(val & 0xFF);
+}
+
+__attribute__((always_inline)) static inline uint8_t
+stack_pop_byte(void)
+{
+  rs[STACK_HEAD_REGISTER] -= 1;
+  return ram[rs[STACK_HEAD_REGISTER]];
+}
+
+__attribute__((always_inline)) static inline uint16_t
+stack_pop_short(void)
+{
+  return ((uint16_t)stack_pop_byte()) | ((uint16_t)stack_pop_byte()) << 8;
+}
+
 __attribute__((always_inline)) static inline struct timespec
 diff_timespec(struct timespec left, struct timespec right)
 {
@@ -161,26 +191,31 @@ run(void)
   bool perf_int = false;
 
   while (!is_halting()) {
-    if (interrupt_mask && !perf_int) {
-      if (poll(&intpollfd, 1, 0) != 0) {
-        perf_int = true;
+    if (interrupt_mask) {
+      if (!perf_int) {
+        if (current_interrupt != INT_NONE) {
+          // begin interrupt procedure
+          perf_int = true;
+          current_interrupt = INT_NONE;
+          stack_push_short(ip);
 
-        uint8_t int_val;
-        if (read(intfd, &int_val, 1) < 0)
-          ERR("failed to read from interrupt pipe\n");
+          switch (current_interrupt) {
+            case INT_P0:
+              ip = get_loc_short(0x0000);
+              break;
+            case INT_P1:
+              ip = get_loc_short(0x0002);
+              break;
 
-        if (int_val > 2)
-          ERR("interrupt value must be either 0, 1, or 2. crashing!\n")
+            case INT_P2:
+              ip = get_loc_short(0x0004);
+              break;
 
-        // printf("caught incoming signal: %i\n", int_val);
-
-        set_loc_short(ip, rs[STACK_HEAD_REGISTER]);
-        rs[STACK_HEAD_REGISTER] += 2;
-        set_loc_short(flags, rs[STACK_HEAD_REGISTER]);
-        rs[STACK_HEAD_REGISTER] += 1;
-
-        ip = get_loc_short(int_val * 2);
-        // printf("%x\n", ip);
+            default:
+              ERR("invalid value in interrupt switch\n");
+          }
+        } else
+          pthread_cond_signal(&interrupt_cond);
       }
     }
 
@@ -481,64 +516,6 @@ run(void)
         op0 = next_byte_adv();
         rs[STACK_HEAD_REGISTER] -= 2;
         rs[op0 & 0x0F] = get_loc_short(rs[STACK_HEAD_REGISTER]);
-        break;
-
-      case READIN_IMM_IMM:
-        op0 = next_short_adv();
-        op1 = next_short_adv();
-        if (read(fake_stdin, &ram[op1], op0) < 0)
-          ERR("failed to read stdin, crashing!\n");
-        break;
-
-      case READIN_IMM_REG:
-        op0 = next_short_adv();
-        op1 = next_byte_adv();
-        if (read(fake_stdin, &ram[rs[op1]], op0) < 0)
-          ERR("failed to read stdin, crashing!\n");
-        break;
-
-      case READIN_REG_IMM:
-        op0 = next_byte_adv();
-        op1 = next_short_adv();
-        if (read(fake_stdin, &ram[rs[op0]], op1) < 0)
-          ERR("failed to read stdin, crashing!\n");
-        break;
-
-      case READIN_REG_REG:
-        op0 = next_byte_adv();
-        if (read(fake_stdin,
-                 (void*)&ram[rs[op0 & 0x0F]],
-                 rs[(op0 & 0xF0) >> 4]) < 0)
-          ERR("failed to read stdin, crashing!\n");
-        break;
-
-      case WRITEOUT_IMM_IMM:
-        op0 = next_short_adv();
-        op1 = next_short_adv();
-        if (write(STDOUT_FILENO, &ram[op1], op0) < 0)
-          ERR("failed to write to stdout, crashing!\n");
-        break;
-
-      case WRITEOUT_IMM_REG:
-        op0 = next_short_adv();
-        op1 = next_byte_adv();
-        if (write(STDOUT_FILENO, &ram[rs[op1]], op0) < 0)
-          ERR("failed to write to stdout, crashing!\n");
-        break;
-
-      case WRITEOUT_REG_IMM:
-        op0 = next_byte_adv();
-        op1 = next_short_adv();
-        if (write(STDOUT_FILENO, &ram[rs[op0]], op1) < 0)
-          ERR("failed to write to stdout, crashing!\n");
-        break;
-
-      case WRITEOUT_REG_REG:
-        op0 = next_byte_adv();
-        if (write(STDOUT_FILENO,
-                  (void*)&ram[rs[op0 & 0x0F]],
-                  rs[(op0 & 0xF0) >> 4]) < 0)
-          ERR("failed to write to stdout, crashing!\n");
         break;
 
       case ENINT:
